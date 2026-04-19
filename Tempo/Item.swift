@@ -1,18 +1,2 @@
-//
-//  Item.swift
-//  Tempo
-//
-//  Created by Sulakshana S on 19/04/26.
-//
-
-import Foundation
-import SwiftData
-
-@Model
-final class Item {
-    var timestamp: Date
-    
-    init(timestamp: Date) {
-        self.timestamp = timestamp
-    }
-}
+// Item.swift is no longer used.
+// Session data is held in-memory via the Session struct (Models/Session.swift).
