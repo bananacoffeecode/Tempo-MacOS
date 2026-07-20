@@ -4,13 +4,20 @@ struct ColorPickerView: View {
     @Binding var selectedColorId: Int
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(CalendarColor.allCases) { calColor in
-                    swatch(for: calColor)
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(CalendarColor.allCases) { calColor in
+                        swatch(for: calColor)
+                            .id(calColor.id)
+                    }
                 }
+                .padding(.vertical, 4)
+                .padding(.horizontal, 2)
             }
-            .padding(.vertical, 2)
+            // Only scroll on first appearance so the current color is visible;
+            // never auto-scroll on tap, which felt jumpy.
+            .onAppear { proxy.scrollTo(selectedColorId, anchor: .center) }
         }
     }
 
@@ -20,22 +27,27 @@ struct ColorPickerView: View {
         return Button {
             selectedColorId = calColor.id
         } label: {
-            ZStack {
-                Circle()
-                    .fill(calColor.color)
-                    .frame(width: 26, height: 26)
-
-                if selected {
+            Circle()
+                .fill(calColor.color)
+                .frame(width: 24, height: 24)
+                .overlay {
                     Circle()
-                        .strokeBorder(.white.opacity(0.7), lineWidth: 2)
-                        .frame(width: 26, height: 26)
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(.white)
+                        .strokeBorder(.white, lineWidth: selected ? 2 : 0)
+                        .padding(1)
                 }
-            }
+                .overlay {
+                    // Subtle ring that grows in around the selected swatch.
+                    Circle()
+                        .strokeBorder(calColor.color, lineWidth: 2)
+                        .padding(-3)
+                        .opacity(selected ? 1 : 0)
+                        .scaleEffect(selected ? 1 : 0.6)
+                }
+                .shadow(color: selected ? calColor.color.opacity(0.5) : .clear, radius: 4)
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .help(calColor.label)
+        .animation(.snappy(duration: 0.22), value: selected)
     }
 }
