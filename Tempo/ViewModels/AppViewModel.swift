@@ -1,5 +1,4 @@
 import Foundation
-import SwiftUI
 
 // MARK: - App State
 
@@ -11,7 +10,7 @@ enum AppState: Equatable {
     case settings
 }
 
-enum OnboardingStep: Equatable {
+enum OnboardingStep: Hashable {
     case email
     case auth
 }
@@ -36,6 +35,17 @@ final class AppViewModel {
     private let calendarService = CalendarService()
     private var timerTask: Task<Void, Never>?
 
+    /// Set by `AppDelegate` to mirror the live timer into the menu bar.
+    /// Passes a compact string while running, `nil` when idle/stopped.
+    var onMenuBarUpdate: ((String?) -> Void)?
+
+    /// Hooks for the `AppDelegate` to show / hide the popover.
+    var onRequestOpen: (() -> Void)?
+    var onRequestClose: (() -> Void)?
+
+    /// Invoked by the close button in the UI.
+    func requestClose() { onRequestClose?() }
+
     // MARK: Init
 
     init() {
@@ -53,6 +63,8 @@ final class AppViewModel {
         await authManager.startOAuthFlow()
         if authManager.isAuthenticated {
             state = .idle
+            // Bring the popover forward immediately after auth completes.
+            onRequestOpen?()
         }
     }
 
@@ -63,6 +75,8 @@ final class AppViewModel {
         elapsedSeconds = 0
         startTimer()
         state = .running
+        // Collapse to the menu bar; the live timer keeps ticking there.
+        onRequestClose?()
     }
 
     func stopSession() {
@@ -75,13 +89,27 @@ final class AppViewModel {
         stopTimer()
         elapsedSeconds = 0
         logError = nil
+        logSuccess = false
         state = .idle
     }
 
+    /// True when the review window describes a positive-length session.
+    var isSessionRangeValid: Bool {
+        session.endTime > session.startTime
+    }
+
+    /// Duration of the current session in whole seconds (never negative).
+    var sessionDurationSeconds: Int {
+        max(0, Int(session.duration))
+    }
+
     func logSession() async {
+        guard isSessionRangeValid else {
+            logError = "End time must be after start time."
+            return
+        }
         isLoggingEvent = true
         logError = nil
-        defer { isLoggingEvent = false }
 
         do {
             let token = try await authManager.validAccessToken()
@@ -92,10 +120,16 @@ final class AppViewModel {
                 colorId:   session.colorId
             )
             _ = try await calendarService.createEvent(event, accessToken: token)
+            isLoggingEvent = false
+
+            // Show the success confirmation briefly, then return to idle.
             logSuccess = true
+            try? await Task.sleep(for: .milliseconds(1100))
+            logSuccess = false
             elapsedSeconds = 0
             state = .idle
         } catch {
+            isLoggingEvent = false
             logError = error.localizedDescription
         }
     }
@@ -110,6 +144,7 @@ final class AppViewModel {
         )
         session.endTime = .now
         logError = nil
+        logSuccess = false
         state = .review
     }
 
@@ -134,8 +169,9 @@ final class AppViewModel {
             guard let self else { return }
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(500))
-                self.elapsedSeconds = Int(Date.now.timeIntervalSince(self.session.startTime))
-                self.syncStatusBar()
+                let seconds = Int(Date.now.timeIntervalSince(self.session.startTime))
+                self.elapsedSeconds = seconds
+                self.onMenuBarUpdate?(seconds.asCompactElapsed)
             }
         }
     }
@@ -143,18 +179,6 @@ final class AppViewModel {
     private func stopTimer() {
         timerTask?.cancel()
         timerTask = nil
-        clearStatusBar()
-    }
-
-    // MARK: - Menu Bar Title
-
-    private func syncStatusBar() {
-        guard let delegate = NSApp.delegate as? AppDelegate else { return }
-        delegate.updateStatusTitle(elapsedFormatted)
-    }
-
-    private func clearStatusBar() {
-        guard let delegate = NSApp.delegate as? AppDelegate else { return }
-        delegate.clearStatusTitle()
+        onMenuBarUpdate?(nil)
     }
 }

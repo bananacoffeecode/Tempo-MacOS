@@ -3,32 +3,63 @@ import SwiftUI
 struct OnboardingView: View {
     @Environment(AppViewModel.self) var viewModel
 
-    var body: some View {
-        @Bindable var viewModel = viewModel
+    private var step: OnboardingStep {
+        if case let .onboarding(step) = viewModel.state { return step }
+        return .email
+    }
 
+    private var isEmailValid: Bool {
+        let email = viewModel.authManager.userEmail.trimmingCharacters(in: .whitespaces)
+        return email.contains("@")
+            && email.contains(".")
+            && !email.hasSuffix("@")
+            && !email.hasSuffix(".")
+            && email.count >= 5
+    }
+
+    var body: some View {
         VStack(spacing: 0) {
             header
-            Divider()
+            Divider().opacity(0.6)
 
-            switch viewModel.state {
-            case .onboarding(.email): emailStep
-            case .onboarding(.auth):  authStep
-            default: EmptyView()
+            Group {
+                switch step {
+                case .email: emailStep.transition(.panelPush)
+                case .auth:  authStep.transition(.panelPush)
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .animation(.tempoSpring, value: step)
         }
     }
 
     // MARK: - Header
 
     private var header: some View {
-        HStack {
+        HStack(spacing: 8) {
+            Image(systemName: "clock")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.tint)
             Text("Tempo")
                 .font(.headline)
                 .fontWeight(.semibold)
             Spacer()
+            stepDots
+            PanelCloseButton()
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+    }
+
+    private var stepDots: some View {
+        HStack(spacing: 5) {
+            ForEach([OnboardingStep.email, .auth], id: \.self) { dot in
+                Capsule()
+                    .fill(dot == step ? Color.accentColor : Color.secondary.opacity(0.3))
+                    .frame(width: dot == step ? 16 : 6, height: 6)
+            }
+        }
+        .animation(.tempoSpring, value: step)
     }
 
     // MARK: - Step 1: Email
@@ -37,7 +68,9 @@ struct OnboardingView: View {
     private var emailStep: some View {
         @Bindable var viewModel = viewModel
 
-        return VStack(spacing: 24) {
+        return VStack(spacing: 22) {
+            iconBadge("envelope.fill")
+
             VStack(spacing: 8) {
                 Text("Welcome to Tempo")
                     .font(.title2)
@@ -55,14 +88,17 @@ struct OnboardingView: View {
                 TextField("name@example.com", text: $viewModel.authManager.userEmail)
                     .textFieldStyle(.roundedBorder)
                     .textContentType(.emailAddress)
+                    .onSubmit { if isEmailValid { viewModel.advanceToAuthStep() } }
             }
 
-            Button("Continue") {
+            Button {
                 viewModel.advanceToAuthStep()
+            } label: {
+                Label("Continue", systemImage: "arrow.right")
+                    .labelStyle(.titleOnly)
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(viewModel.authManager.userEmail.trimmingCharacters(in: .whitespaces).isEmpty)
-            .frame(maxWidth: .infinity)
+            .buttonStyle(TempoPrimaryButtonStyle())
+            .disabled(!isEmailValid)
         }
         .padding(24)
     }
@@ -70,7 +106,9 @@ struct OnboardingView: View {
     // MARK: - Step 2: Google Auth
 
     private var authStep: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: 22) {
+            iconBadge("calendar")
+
             VStack(spacing: 8) {
                 Text("Connect Google Calendar")
                     .font(.title2)
@@ -82,34 +120,68 @@ struct OnboardingView: View {
             }
 
             if let error = viewModel.authManager.error {
-                Text(error)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 4)
+                ErrorBanner(text: error)
+                    .transition(.opacity.combined(with: .offset(y: -4)))
             }
 
-            Button {
-                Task { await viewModel.startGoogleAuth() }
-            } label: {
-                HStack(spacing: 8) {
-                    if viewModel.authManager.isLoading {
-                        ProgressView().controlSize(.small)
+            VStack(spacing: 10) {
+                Button {
+                    Task { await viewModel.startGoogleAuth() }
+                } label: {
+                    HStack(spacing: 8) {
+                        if viewModel.authManager.isLoading {
+                            ProgressView().controlSize(.small).tint(.white)
+                        }
+                        Text(viewModel.authManager.isLoading ? "Authorizing…" : "Authorize with Google")
                     }
-                    Text("Authorize with Google")
                 }
-                .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(viewModel.authManager.isLoading)
+                .buttonStyle(TempoPrimaryButtonStyle())
+                .disabled(viewModel.authManager.isLoading)
 
-            Button("Back") {
-                viewModel.state = .onboarding(.email)
+                Button("Back") {
+                    viewModel.state = .onboarding(.email)
+                }
+                .buttonStyle(TempoLinkButtonStyle())
+                .disabled(viewModel.authManager.isLoading)
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .font(.footnote)
         }
         .padding(24)
+        .animation(.tempoSpring, value: viewModel.authManager.error)
+    }
+
+    // MARK: - Pieces
+
+    private func iconBadge(_ symbol: String) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: 22, weight: .medium))
+            .foregroundStyle(.tint)
+            .frame(width: 56, height: 56)
+            .background {
+                Circle().fill(.tint.opacity(0.12))
+            }
+            .transition(.scale.combined(with: .opacity))
+    }
+}
+
+// MARK: - Error Banner
+
+struct ErrorBanner: View {
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(.primary)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(10)
+        .background {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(.orange.opacity(0.12))
+        }
     }
 }

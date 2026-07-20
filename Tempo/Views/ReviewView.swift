@@ -3,27 +3,58 @@ import SwiftUI
 struct ReviewView: View {
     @Environment(AppViewModel.self) var viewModel
 
-    var body: some View {
-        @Bindable var viewModel = viewModel
+    private var accentColor: Color {
+        CalendarColor(rawValue: viewModel.session.colorId)?.color ?? .accentColor
+    }
 
+    var body: some View {
         VStack(spacing: 0) {
             toolbar
-            Divider()
+            Divider().opacity(0.6)
             form
         }
+        .overlay {
+            if viewModel.logSuccess {
+                SuccessOverlay(color: accentColor)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.tempoSpring, value: viewModel.logSuccess)
     }
 
     // MARK: - Toolbar
 
     private var toolbar: some View {
-        HStack {
+        HStack(spacing: 8) {
+            Button {
+                viewModel.discardSession()
+            } label: {
+                Image(systemName: "chevron.left")
+            }
+            .buttonStyle(TempoIconButtonStyle())
+            .disabled(viewModel.isLoggingEvent || viewModel.logSuccess)
+            .help("Back")
+
             Text("Log session")
                 .font(.headline)
                 .fontWeight(.semibold)
             Spacer()
+
+            Text(viewModel.sessionDurationSeconds.asDurationLabel)
+                .font(.caption.weight(.medium).monospacedDigit())
+                .foregroundStyle(viewModel.isSessionRangeValid ? .secondary : Color.orange)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background {
+                    Capsule().fill(.secondary.opacity(0.12))
+                }
+                .contentTransition(.numericText())
+                .animation(.tempoSnappy, value: viewModel.sessionDurationSeconds)
+
+            PanelCloseButton()
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
     }
 
     // MARK: - Form
@@ -33,7 +64,7 @@ struct ReviewView: View {
         @Bindable var viewModel = viewModel
 
         return ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 18) {
 
                 field(label: "Session name") {
                     TextField("What did you work on?", text: $viewModel.session.name)
@@ -49,43 +80,46 @@ struct ReviewView: View {
                     }
                 }
 
+                if !viewModel.isSessionRangeValid {
+                    ErrorBanner(text: "End time must be after the start time.")
+                        .transition(.opacity.combined(with: .offset(y: -4)))
+                }
+
                 field(label: "Color") {
                     ColorPickerView(selectedColorId: $viewModel.session.colorId)
                 }
 
                 if let error = viewModel.logError {
-                    Text(error)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: .infinity)
+                    ErrorBanner(text: error)
+                        .transition(.opacity.combined(with: .offset(y: -4)))
                 }
 
-                VStack(spacing: 8) {
+                VStack(spacing: 10) {
                     Button {
                         Task { await viewModel.logSession() }
                     } label: {
                         HStack(spacing: 8) {
                             if viewModel.isLoggingEvent {
-                                ProgressView().controlSize(.small)
+                                ProgressView().controlSize(.small).tint(.white)
                             }
-                            Text("Log to Calendar")
+                            Text(viewModel.isLoggingEvent ? "Logging…" : "Log to Calendar")
                         }
-                        .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(viewModel.isLoggingEvent)
+                    .buttonStyle(TempoPrimaryButtonStyle(tint: accentColor))
+                    .disabled(viewModel.isLoggingEvent || !viewModel.isSessionRangeValid)
 
                     Button("Discard") {
                         viewModel.discardSession()
                     }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .font(.footnote)
+                    .buttonStyle(TempoLinkButtonStyle(color: .red))
+                    .disabled(viewModel.isLoggingEvent)
                 }
             }
             .padding(24)
+            .animation(.tempoSpring, value: viewModel.isSessionRangeValid)
+            .animation(.tempoSpring, value: viewModel.logError)
         }
+        .scrollBounceBehavior(.basedOnSize)
     }
 
     @ViewBuilder
@@ -95,6 +129,29 @@ struct ReviewView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             content()
+        }
+    }
+}
+
+// MARK: - Success Overlay
+
+struct SuccessOverlay: View {
+    let color: Color
+
+    var body: some View {
+        ZStack {
+            Rectangle()
+                .fill(.ultraThinMaterial)
+
+            VStack(spacing: 14) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 52))
+                    .foregroundStyle(color)
+                    .symbolEffect(.bounce, options: .nonRepeating)
+
+                Text("Logged to Calendar")
+                    .font(.headline)
+            }
         }
     }
 }
